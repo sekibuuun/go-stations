@@ -2,6 +2,10 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"log"
+	"net/http"
+	"strconv"
 
 	"github.com/TechBowl-japan/go-stations/model"
 	"github.com/TechBowl-japan/go-stations/service"
@@ -16,6 +20,139 @@ type TODOHandler struct {
 func NewTODOHandler(svc *service.TODOService) *TODOHandler {
 	return &TODOHandler{
 		svc: svc,
+	}
+}
+
+func (h *TODOHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		var req model.CreateTODORequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			log.Fatal(err)
+			return
+		}
+
+		if req.Subject == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		todo, err := h.svc.CreateTODO(context.Background(), req.Subject, req.Description)
+
+		if req.Description == "" {
+			w.WriteHeader(http.StatusOK)
+		}
+
+		if err != nil {
+			log.Fatal(err)
+		}
+		res := model.CreateTODOResponse{
+			TODO: *todo,
+		}
+		encoder := json.NewEncoder(w)
+		if err := encoder.Encode(res); err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	if r.Method == http.MethodPut {
+		var req model.UpdateTODORequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			log.Fatal(err)
+			return
+		}
+
+		if req.Subject == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		if req.ID == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		todo, err := h.svc.UpdateTODO(context.Background(), req.ID, req.Subject, req.Description)
+
+		if todo == nil {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		if err != nil {
+			log.Fatal(err)
+		}
+		res := model.UpdateTODOResponse{
+			TODO: *todo,
+		}
+		encoder := json.NewEncoder(w)
+		if err := encoder.Encode(res); err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	if r.Method == http.MethodGet {
+		var req model.ReadTODORequest
+		queryParams := r.URL.Query()
+
+		if PrevID := queryParams.Get("prev_id"); PrevID != "" {
+			req.PrevID, _ = strconv.ParseInt(PrevID, 10, 64)
+		}
+		if Size := queryParams.Get("size"); Size != "" {
+			req.Size, _ = strconv.ParseInt(Size, 10, 64)
+		}
+		if req.Size == 0 {
+			req.Size = 5
+		}
+
+		todos, err := h.svc.ReadTODO(context.Background(), req.PrevID, req.Size)
+
+		if err != nil {
+			log.Fatal(err)
+		}
+		res := model.ReadTODOResponse{
+			TODOs: todos,
+		}
+		encoder := json.NewEncoder(w)
+		if err := encoder.Encode(res); err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	if r.Method == http.MethodDelete {
+		var req model.DeleteTODORequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			log.Println("Error decoding request:", err)
+			return
+		}
+
+		if len(req.IDs) == 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			log.Println("Empty IDs list")
+			return
+		}
+
+		err := h.svc.DeleteTODO(context.Background(), req.IDs)
+		if err != nil {
+			if _, ok := err.(*model.ErrNotFound); ok {
+				w.WriteHeader(http.StatusNotFound)
+			} else {
+				w.WriteHeader(http.StatusInternalServerError)
+			}
+			log.Println("Error deleting TODO:", err)
+			return
+		}
+
+		res := model.DeleteTODOResponse{}
+		encoder := json.NewEncoder(w)
+		if err := encoder.Encode(res); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			log.Println("Error encoding response:", err)
+			return
+		}
+		return
 	}
 }
 
